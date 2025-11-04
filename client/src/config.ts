@@ -1,3 +1,4 @@
+// Import config.json - Vite handles JSON imports automatically
 import configData from '../config.json';
 
 interface ServerConfig {
@@ -9,7 +10,17 @@ interface AppConfig {
   server: ServerConfig;
 }
 
+// Type assertion with runtime validation
 const config: AppConfig = configData as AppConfig;
+
+// Validate config structure
+if (!config.server || !config.server.host || !config.server.port) {
+  console.error('Invalid config.json structure. Using defaults.');
+  config.server = {
+    host: 'localhost',
+    port: 3000
+  };
+}
 
 export function getApiBaseUrl(): string {
   const { host, port } = config.server;

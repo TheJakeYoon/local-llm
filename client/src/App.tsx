@@ -81,14 +81,34 @@ function App() {
     } catch (err) {
       let errorMessage = 'Network error occurred';
       
-      if (err instanceof TypeError && err.message.includes('Failed to fetch')) {
-        errorMessage = `Cannot connect to API server at ${getApiBaseUrl()}. Please check if the server is running.`;
+      if (err instanceof TypeError) {
+        if (err.message.includes('Failed to fetch') || err.message.includes('Load failed')) {
+          errorMessage = `Cannot connect to API server at ${getApiBaseUrl()}. 
+          
+Possible issues:
+- Server is not running
+- CORS is blocking the request
+- Network connectivity issue
+- Firewall blocking the connection
+
+Please check:
+1. The Express server is running on ${getApiBaseUrl()}
+2. CORS is enabled on the server
+3. Your network allows connections to this IP`;
+        } else {
+          errorMessage = `Network error: ${err.message}`;
+        }
       } else if (err instanceof Error) {
         errorMessage = err.message;
       }
       
       setError(errorMessage);
       console.error('API Error:', err);
+      console.error('Error details:', {
+        message: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+        apiUrl: getApiUrl('/api/chat'),
+      });
     } finally {
       setLoading(false);
     }

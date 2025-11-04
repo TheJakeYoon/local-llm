@@ -257,13 +257,13 @@ app.post('/api/chat', async (req: Request<{}, ChatResponse, ChatRequestBody>, re
     // Handle errors from Ollama SDK
     const errorMessage = error instanceof Error ? error.message : String(error);
     
-    if (errorMessage.includes('connect') || errorMessage.includes('ECONNREFUSED')) {
+    if (errorMessage.includes('connect') || errorMessage.includes('ECONNREFUSED') || errorMessage.includes('fetch failed')) {
       // Connection error
       logError('Ollama connection error', error, req, 503);
       return res.status(503).json({
         success: false,
         error: 'Ollama service unavailable',
-        message: 'Could not connect to Ollama. Make sure Ollama is running and accessible.',
+        message: `Could not connect to Ollama at ${OLLAMA_HOST}. Make sure Ollama is running and accessible.`,
       });
     } else if (errorMessage.includes('model')) {
       // Model not found error
@@ -336,9 +336,25 @@ app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
   });
 });
 
+// Check Ollama connectivity on startup
+async function checkOllamaConnection() {
+  try {
+    await ollama.list();
+    logInfo('Ollama connection verified', { host: OLLAMA_HOST });
+    console.log(`✅ Ollama is accessible at ${OLLAMA_HOST}`);
+  } catch (error) {
+    logWarn('Ollama not accessible on startup', {
+      host: OLLAMA_HOST,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    console.log(`⚠️  Warning: Cannot connect to Ollama at ${OLLAMA_HOST}`);
+    console.log(`   Make sure Ollama is running: ollama serve`);
+  }
+}
+
 // Start server - listen on all interfaces (0.0.0.0) to accept external connections
 const HOST = process.env.HOST || '0.0.0.0';
-app.listen(PORT, HOST, () => {
+app.listen(PORT, HOST, async () => {
   logInfo('Server started', {
     host: HOST,
     port: PORT,
@@ -346,10 +362,14 @@ app.listen(PORT, HOST, () => {
   });
   console.log(`🚀 Server is running on http://${HOST}:${PORT}`);
   console.log(`🌐 Accessible from network at http://localhost:${PORT} or http://[your-ip]:${PORT}`);
+  console.log(`🤖 Ollama host: ${OLLAMA_HOST}`);
   console.log(`💚 Health check: http://localhost:${PORT}/health`);
   console.log(`💬 Chat endpoint: POST http://localhost:${PORT}/api/chat`);
   console.log(`📋 Models endpoint: GET http://localhost:${PORT}/api/models`);
   console.log(`📝 Logs are being written to: ${logFile}`);
+  
+  // Check Ollama connection
+  await checkOllamaConnection();
 });
 
 // Handle uncaught exceptions

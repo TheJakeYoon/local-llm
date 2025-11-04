@@ -1,8 +1,73 @@
 import express, { Request, Response, NextFunction } from 'express';
 import ollama from 'ollama';
+import fs from 'fs';
+import path from 'path';
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+
+// Logger utility
+interface LogEntry {
+  timestamp: string;
+  level: 'INFO' | 'ERROR' | 'WARN';
+  message: string;
+  details?: any;
+  endpoint?: string;
+  method?: string;
+  statusCode?: number;
+}
+
+const logDir = path.join(process.cwd(), 'logs');
+if (!fs.existsSync(logDir)) {
+  fs.mkdirSync(logDir, { recursive: true });
+}
+
+const logFile = path.join(logDir, `server-${new Date().toISOString().split('T')[0]}.log`);
+
+function writeLog(entry: LogEntry) {
+  const logLine = JSON.stringify(entry) + '\n';
+  fs.appendFileSync(logFile, logLine, 'utf8');
+  console.log(`[${entry.level}] ${entry.timestamp} - ${entry.message}`);
+  if (entry.details) {
+    console.log('Details:', entry.details);
+  }
+}
+
+function logError(message: string, error: unknown, req?: Request, statusCode?: number) {
+  const errorDetails = {
+    message: error instanceof Error ? error.message : String(error),
+    stack: error instanceof Error ? error.stack : undefined,
+    name: error instanceof Error ? error.name : undefined,
+  };
+
+  writeLog({
+    timestamp: new Date().toISOString(),
+    level: 'ERROR',
+    message,
+    details: errorDetails,
+    endpoint: req?.path,
+    method: req?.method,
+    statusCode,
+  });
+}
+
+function logInfo(message: string, details?: any) {
+  writeLog({
+    timestamp: new Date().toISOString(),
+    level: 'INFO',
+    message,
+    details,
+  });
+}
+
+function logWarn(message: string, details?: any) {
+  writeLog({
+    timestamp: new Date().toISOString(),
+    level: 'WARN',
+    message,
+    details,
+  });
+}
 
 // Request body types
 interface ChatRequestBody {
@@ -48,12 +113,55 @@ interface ModelsResponse {
   message?: string;
 }
 
+// CORS middleware - must be before all routes
+app.use((req: Request, res: Response, next: NextFunction) => {
+  // Set CORS headers for all responses
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
+  
+  // Handle preflight requests - respond immediately
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+  
+  next();
+});
+
 // Middleware
 app.use(express.json());
 
 // Request logging middleware
-app.use((req: Request, _res: Response, next: NextFunction) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const startTime = Date.now();
+  
+  // Log request
+  logInfo(`Request: ${req.method} ${req.path}`, {
+    ip: req.ip,
+    userAgent: req.get('user-agent'),
+    contentType: req.get('content-type'),
+  });
+
+  // Log response when finished
+  res.on('finish', () => {
+    const duration = Date.now() - startTime;
+    const logLevel = res.statusCode >= 400 ? 'ERROR' : 'INFO';
+    writeLog({
+      timestamp: new Date().toISOString(),
+      level: logLevel,
+      message: `Response: ${req.method} ${req.path}`,
+      details: {
+        statusCode: res.statusCode,
+        duration: `${duration}ms`,
+      },
+      endpoint: req.path,
+      method: req.method,
+      statusCode: res.statusCode,
+    });
+  });
+
   next();
 });
 
@@ -66,6 +174,15 @@ app.get('/health', (_req: Request, res: Response<HealthResponse>) => {
   });
 });
 
+// Handle OPTIONS for API routes explicitly
+app.options('/api/chat', (_req: Request, res: Response) => {
+  res.status(200).end();
+});
+
+app.options('/api/models', (_req: Request, res: Response) => {
+  res.status(200).end();
+});
+
 // Main chat endpoint
 app.post('/api/chat', async (req: Request<{}, ChatResponse, ChatRequestBody>, res: Response<ChatResponse>) => {
   try {
@@ -73,6 +190,10 @@ app.post('/api/chat', async (req: Request<{}, ChatResponse, ChatRequestBody>, re
 
     // Validate request - support both single message and messages array
     if (!message && !messages) {
+      logWarn('Validation error: Missing message or messages field', {
+        body: req.body,
+        endpoint: '/api/chat',
+      });
       return res.status(400).json({
         success: false,
         error: 'Missing required field: message or messages'
@@ -96,10 +217,25 @@ app.post('/api/chat', async (req: Request<{}, ChatResponse, ChatRequestBody>, re
 
     // Call Ollama API using official SDK
     // Note: Streaming is not supported in this simple API - always use non-streaming
+    logInfo('Calling Ollama API', {
+      model,
+      messageCount: chatMessages.length,
+      endpoint: '/api/chat',
+    });
+
+    const startTime = Date.now();
     const response = await ollama.chat({
       model: model,
       messages: chatMessages,
       stream: false
+    });
+    const duration = Date.now() - startTime;
+
+    logInfo('Ollama API call successful', {
+      model,
+      duration: `${duration}ms`,
+      evalCount: response.eval_count,
+      promptEvalCount: response.prompt_eval_count,
     });
 
     // Return response in JSON format
@@ -118,16 +254,12 @@ app.post('/api/chat', async (req: Request<{}, ChatResponse, ChatRequestBody>, re
     });
 
   } catch (error) {
-    console.error('Error calling Ollama:', error instanceof Error ? error.message : String(error));
-    if (error instanceof Error) {
-      console.error(error.stack);
-    }
-    
     // Handle errors from Ollama SDK
     const errorMessage = error instanceof Error ? error.message : String(error);
     
     if (errorMessage.includes('connect') || errorMessage.includes('ECONNREFUSED')) {
       // Connection error
+      logError('Ollama connection error', error, req, 503);
       return res.status(503).json({
         success: false,
         error: 'Ollama service unavailable',
@@ -135,6 +267,7 @@ app.post('/api/chat', async (req: Request<{}, ChatResponse, ChatRequestBody>, re
       });
     } else if (errorMessage.includes('model')) {
       // Model not found error
+      logError('Model not found', error, req, 404);
       return res.status(404).json({
         success: false,
         error: 'Model not found',
@@ -142,6 +275,7 @@ app.post('/api/chat', async (req: Request<{}, ChatResponse, ChatRequestBody>, re
       });
     } else {
       // Other errors
+      logError('Error calling Ollama API', error, req, 500);
       return res.status(500).json({
         success: false,
         error: 'Error calling Ollama',
@@ -152,9 +286,13 @@ app.post('/api/chat', async (req: Request<{}, ChatResponse, ChatRequestBody>, re
 });
 
 // Get available models endpoint
-app.get('/api/models', async (_req: Request, res: Response<ModelsResponse>) => {
+app.get('/api/models', async (req: Request, res: Response<ModelsResponse>) => {
   try {
+    logInfo('Fetching available models', { endpoint: '/api/models' });
     const response = await ollama.list();
+    const modelCount = response.models?.length || 0;
+    logInfo('Models fetched successfully', { count: modelCount });
+    
     return res.json({
       success: true,
       models: (response.models || []).map(model => ({
@@ -165,7 +303,7 @@ app.get('/api/models', async (_req: Request, res: Response<ModelsResponse>) => {
       }))
     });
   } catch (error) {
-    console.error('Error fetching models:', error instanceof Error ? error.message : String(error));
+    logError('Error fetching models', error, req, 500);
     return res.status(500).json({
       success: false,
       error: 'Error fetching models',
@@ -176,6 +314,11 @@ app.get('/api/models', async (_req: Request, res: Response<ModelsResponse>) => {
 
 // 404 handler
 app.use((req: Request, res: Response) => {
+  logWarn('Route not found', {
+    method: req.method,
+    path: req.path,
+    endpoint: req.path,
+  });
   res.status(404).json({
     success: false,
     error: 'Not found',
@@ -184,8 +327,8 @@ app.use((req: Request, res: Response) => {
 });
 
 // Error handler
-app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-  console.error('Unhandled error:', err);
+app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
+  logError('Unhandled error in Express middleware', err, req, 500);
   res.status(500).json({
     success: false,
     error: 'Internal server error',
@@ -193,11 +336,31 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   });
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Server is running on http://localhost:${PORT}`);
+// Start server - listen on all interfaces (0.0.0.0) to accept external connections
+const HOST = process.env.HOST || '0.0.0.0';
+app.listen(PORT, HOST, () => {
+  logInfo('Server started', {
+    host: HOST,
+    port: PORT,
+    logFile: logFile,
+  });
+  console.log(`🚀 Server is running on http://${HOST}:${PORT}`);
+  console.log(`🌐 Accessible from network at http://localhost:${PORT} or http://[your-ip]:${PORT}`);
   console.log(`💚 Health check: http://localhost:${PORT}/health`);
   console.log(`💬 Chat endpoint: POST http://localhost:${PORT}/api/chat`);
   console.log(`📋 Models endpoint: GET http://localhost:${PORT}/api/models`);
+  console.log(`📝 Logs are being written to: ${logFile}`);
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error: Error) => {
+  logError('Uncaught Exception', error);
+  process.exit(1);
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason: unknown) => {
+  const error = reason instanceof Error ? reason : new Error(String(reason));
+  logError('Unhandled Promise Rejection', error);
 });
 

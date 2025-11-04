@@ -1,6 +1,6 @@
 # Local LLM Express API
 
-A TypeScript Express.js API server that acts as a proxy to Ollama's chat API.
+A TypeScript Express.js API server that acts as a proxy to Ollama's chat API, with a React client application for chat interactions.
 
 ## Prerequisites
 
@@ -38,6 +38,27 @@ npm run type-check
 ```
 
 The server will start on `http://localhost:3000` by default.
+
+## Client Application
+
+A React chat interface is available in the `client` directory. To run it:
+
+1. Navigate to the client directory:
+```bash
+cd client
+```
+
+2. Install dependencies:
+```bash
+npm install
+```
+
+3. Start the development server:
+```bash
+npm run dev
+```
+
+The client will be available at `http://localhost:5173` and will automatically proxy API requests to the Express server.
 
 ## API Endpoints
 

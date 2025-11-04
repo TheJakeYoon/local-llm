@@ -1,10 +1,10 @@
 # Local LLM Express API
 
-A simple Express.js API server that acts as a proxy to Ollama's chat API.
+A TypeScript Express.js API server that acts as a proxy to Ollama's chat API.
 
 ## Prerequisites
 
-- Node.js (v14 or higher)
+- Node.js (v18 or higher)
 - Ollama installed and running locally (default: http://localhost:11434)
 
 ## Installation
@@ -12,6 +12,11 @@ A simple Express.js API server that acts as a proxy to Ollama's chat API.
 1. Install dependencies:
 ```bash
 npm install
+```
+
+2. Build the TypeScript code:
+```bash
+npm run build
 ```
 
 ## Usage
@@ -22,9 +27,14 @@ npm install
 npm start
 ```
 
-For development with auto-reload:
+For development with auto-reload (TypeScript):
 ```bash
 npm run dev
+```
+
+To type-check without building:
+```bash
+npm run type-check
 ```
 
 The server will start on `http://localhost:3000` by default.

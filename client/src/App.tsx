@@ -21,7 +21,6 @@ function App() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [model, setModel] = useState('llama3.1');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -55,7 +54,6 @@ function App() {
         },
         body: JSON.stringify({
           message: userMessage.content,
-          model: model,
         }),
       });
 
@@ -135,17 +133,6 @@ Please check:
             <div className="server-info">Server: {getApiBaseUrl()}</div>
           </div>
           <div className="header-controls">
-            <select
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              className="model-select"
-              disabled={loading}
-            >
-              <option value="llama3.1">Llama 3.1</option>
-              <option value="llama2">Llama 2</option>
-              <option value="mistral">Mistral</option>
-              <option value="codellama">CodeLlama</option>
-            </select>
             <button onClick={clearChat} className="clear-btn" disabled={loading}>
               Clear
             </button>

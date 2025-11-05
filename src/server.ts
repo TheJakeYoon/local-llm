@@ -186,7 +186,8 @@ app.options('/api/models', (_req: Request, res: Response) => {
 // Main chat endpoint
 app.post('/api/chat', async (req: Request<{}, ChatResponse, ChatRequestBody>, res: Response<ChatResponse>) => {
   try {
-    const { message, model = 'llama3.1', messages } = req.body;
+    const { message, messages } = req.body;
+    const model = 'gpt-oss'; // Only allow gpt-oss model
 
     // Validate request - support both single message and messages array
     if (!message && !messages) {
@@ -336,21 +337,6 @@ app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
   });
 });
 
-// Check Ollama connectivity on startup
-async function checkOllamaConnection() {
-  try {
-    await ollama.list();
-    logInfo('Ollama connection verified');
-    console.log(`✅ Ollama is accessible`);
-  } catch (error) {
-    logWarn('Ollama not accessible on startup', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    console.log(`⚠️  Warning: Cannot connect to Ollama`);
-    console.log(`   Make sure Ollama is running: ollama serve`);
-  }
-}
-
 // Start server - listen on all interfaces (0.0.0.0) to accept external connections
 const HOST = process.env.HOST || '0.0.0.0';
 app.listen(PORT, HOST, async () => {
@@ -365,9 +351,6 @@ app.listen(PORT, HOST, async () => {
   console.log(`💬 Chat endpoint: POST http://localhost:${PORT}/api/chat`);
   console.log(`📋 Models endpoint: GET http://localhost:${PORT}/api/models`);
   console.log(`📝 Logs are being written to: ${logFile}`);
-  
-  // Check Ollama connection
-  await checkOllamaConnection();
 });
 
 // Handle uncaught exceptions
